@@ -1,6 +1,5 @@
 using System;
 using System.Globalization;
-using System.Linq;
 using System.Xml.Linq;
 using Transaq.NinjaTraderAdapter.State;
 
@@ -37,13 +36,16 @@ public sealed class XmlRouter
         switch (root.Name.LocalName)
         {
             case "server_status":
-                OnServerStatus?.Invoke((root.Attribute("connected")?.Value ?? "false") == "true");
+                OnServerStatus?.Invoke((V(root, "connected") ?? "false") == "true");
                 break;
             case "quotations":
                 foreach (var q in root.Elements("quotation"))
                 {
                     var key = Key(q);
-                    var snap = _marketData.Merge(key, bid: Dec(q.Element("bid")?.Value), ask: Dec(q.Element("ask")?.Value));
+                    var snap = _marketData.Merge(key,
+                        last: DecV(q, "last"),
+                        bid: DecV(q, "bid"),
+                        ask: DecV(q, "ask"));
                     OnBidAskUpdate?.Invoke(key, snap);
                 }
                 break;
@@ -52,20 +54,21 @@ public sealed class XmlRouter
                 foreach (var t in root.Elements())
                 {
                     var key = Key(t);
-                    var price = Dec(t.Element("price")?.Value) ?? 0m;
-                    var qty = Dec(t.Element("quantity")?.Value) ?? 0m;
-                    var snap = _marketData.Merge(key, last: price);
-                    OnLastTrade?.Invoke(key, price, qty, snap.TimestampUtc);
+                    var price = DecV(t, "price") ?? 0m;
+                    var qty = DecV(t, "quantity") ?? 0m;
+                    var timestamp = DateTimeOffset.TryParse(V(t, "time"), out var parsed) ? parsed : DateTimeOffset.UtcNow;
+                    _marketData.Merge(key, last: price, timestampUtc: timestamp);
+                    OnLastTrade?.Invoke(key, price, qty, timestamp);
                 }
                 break;
             case "quotes":
                 foreach (var q in root.Elements("quote"))
                 {
                     _domBook.ApplyDelta(new QuoteDelta(
-                        Dec(q.Element("price")?.Value) ?? 0m,
-                        Dec(q.Element("buy")?.Value),
-                        Dec(q.Element("sell")?.Value),
-                        q.Element("source")?.Value));
+                        DecV(q, "price") ?? 0m,
+                        DecV(q, "buy"),
+                        DecV(q, "sell"),
+                        V(q, "source")));
                 }
                 OnDomUpdate?.Invoke(_domBook);
                 break;
@@ -73,12 +76,12 @@ public sealed class XmlRouter
                 foreach (var o in root.Elements("order"))
                 {
                     var state = _orders.Upsert(
-                        Long(o.Element("transactionid")?.Value),
-                        Long(o.Element("orderno")?.Value),
-                        o.Element("status")?.Value ?? string.Empty,
-                        Dec(o.Element("quantity")?.Value) ?? 0,
-                        Dec(o.Element("filled")?.Value) ?? 0);
-                    if ((Long(o.Element("withdrawtime")?.Value)) == 0 && state.Status == "cancelled")
+                        LongV(o, "transactionid"),
+                        LongV(o, "orderno"),
+                        V(o, "status") ?? string.Empty,
+                        DecV(o, "quantity") ?? 0,
+                        DecV(o, "filled") ?? 0);
+                    if (LongV(o, "withdrawtime") == 0 && state.Status == "cancelled")
                     {
                         state.NtState = NtOrderState.Cancelling;
                     }
@@ -90,11 +93,11 @@ public sealed class XmlRouter
             case "forts_money":
             case "clientlimits":
                 _positions.Merge(
-                    openBalance: Dec(root.Element("open_balance")?.Value),
-                    currentBalance: Dec(root.Element("current_balance")?.Value),
-                    variationMargin: Dec(root.Element("varmargin")?.Value),
-                    cash: Dec(root.Element("cash")?.Value),
-                    usedMargin: Dec(root.Element("margin")?.Value));
+                    openBalance: DecV(root, "open_balance"),
+                    currentBalance: DecV(root, "current_balance"),
+                    variationMargin: DecV(root, "varmargin"),
+                    cash: DecV(root, "cash"),
+                    usedMargin: DecV(root, "margin"));
                 break;
             case "securities":
                 foreach (var sec in root.Elements("security"))
@@ -102,16 +105,19 @@ public sealed class XmlRouter
                     _instruments.Upsert(
                         Key(sec),
                         new InstrumentInfo(
-                            Dec(sec.Element("lotsize")?.Value) ?? 1,
-                            (int)(Dec(sec.Element("decimals")?.Value) ?? 0),
-                            Dec(sec.Element("minstep")?.Value) ?? 0,
-                            Dec(sec.Element("point_cost")?.Value) ?? 0));
+                            DecV(sec, "lotsize") ?? 1,
+                            (int)(DecV(sec, "decimals") ?? 0),
+                            DecV(sec, "minstep") ?? 0,
+                            DecV(sec, "point_cost") ?? 0));
                 }
                 break;
         }
     }
 
-    private static InstrumentKey Key(XElement e) => new(e.Element("board")?.Value ?? string.Empty, e.Element("seccode")?.Value ?? string.Empty);
+    private static string? V(XElement e, string name) => e.Attribute(name)?.Value ?? e.Element(name)?.Value;
+    private static InstrumentKey Key(XElement e) => new(V(e, "board") ?? string.Empty, V(e, "seccode") ?? string.Empty);
     private static decimal? Dec(string? value) => decimal.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out var d) ? d : null;
+    private static decimal? DecV(XElement e, string name) => Dec(V(e, name));
     private static long Long(string? value) => long.TryParse(value, out var v) ? v : 0;
+    private static long LongV(XElement e, string name) => Long(V(e, name));
 }

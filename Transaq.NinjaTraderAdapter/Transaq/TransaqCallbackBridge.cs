@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Concurrent;
-using System.Text;
 using Transaq.NinjaTraderAdapter.Interop;
 
 namespace Transaq.NinjaTraderAdapter.Transaq;
@@ -8,12 +7,14 @@ namespace Transaq.NinjaTraderAdapter.Transaq;
 public sealed class TransaqCallbackBridge
 {
     private readonly ITransaqNative _native;
-    private readonly ConcurrentQueue<string> _queue;
+    private readonly BlockingCollection<string> _queue;
+    private readonly Action<string> _log;
 
-    public TransaqCallbackBridge(ITransaqNative native, ConcurrentQueue<string> queue)
+    public TransaqCallbackBridge(ITransaqNative native, BlockingCollection<string> queue, Action<string>? log = null)
     {
         _native = native;
         _queue = queue;
+        _log = log ?? (_ => { });
     }
 
     public TransaqNative.CallbackEx Build() => Callback;
@@ -22,32 +23,18 @@ public sealed class TransaqCallbackBridge
     {
         try
         {
-            if (data == IntPtr.Zero)
+            if (data != IntPtr.Zero)
             {
-                return true;
+                var message = Utf8StringReader.ReadUtf8Z(data);
+                _native.FreeMemory(data);
+                _queue.Add(message);
             }
-
-            var message = ReadUtf8Z(data);
-            _native.FreeMemory(data);
-            _queue.Enqueue(message);
-            return true;
         }
-        catch
+        catch (Exception ex)
         {
-            return false;
-        }
-    }
-
-    private static string ReadUtf8Z(IntPtr ptr)
-    {
-        var bytes = new System.Collections.Generic.List<byte>();
-        var offset = 0;
-        byte value;
-        while ((value = System.Runtime.InteropServices.Marshal.ReadByte(ptr, offset++)) != 0)
-        {
-            bytes.Add(value);
+            _log($"Callback error: {ex}");
         }
 
-        return Encoding.UTF8.GetString(bytes.ToArray());
+        return true;
     }
 }

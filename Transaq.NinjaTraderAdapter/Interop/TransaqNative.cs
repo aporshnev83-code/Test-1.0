@@ -56,9 +56,9 @@ public sealed class TransaqNative : ITransaqNative
                 return string.Empty;
             }
 
-            var s = Marshal.PtrToStringAnsi(ptr) ?? string.Empty;
+            var value = Utf8StringReader.ReadUtf8Z(ptr);
             NativeFreeMemory(ptr);
-            return s;
+            return value;
         }
     }
 }

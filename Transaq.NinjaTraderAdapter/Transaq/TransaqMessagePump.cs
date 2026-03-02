@@ -7,13 +7,13 @@ namespace Transaq.NinjaTraderAdapter.Transaq;
 
 public sealed class TransaqMessagePump : IDisposable
 {
-    private readonly ConcurrentQueue<string> _queue;
+    private readonly BlockingCollection<string> _queue;
     private readonly XmlRouter _router;
     private readonly Action<string> _log;
     private readonly CancellationTokenSource _cts = new();
     private Thread? _thread;
 
-    public TransaqMessagePump(ConcurrentQueue<string> queue, XmlRouter router, Action<string>? log = null)
+    public TransaqMessagePump(BlockingCollection<string> queue, XmlRouter router, Action<string>? log = null)
     {
         _queue = queue;
         _router = router;
@@ -29,28 +29,30 @@ public sealed class TransaqMessagePump : IDisposable
     public void Stop()
     {
         _cts.Cancel();
+        _queue.CompleteAdding();
         _thread?.Join(TimeSpan.FromSeconds(2));
     }
 
     private void Run()
     {
-        while (!_cts.IsCancellationRequested)
+        try
         {
-            if (!_queue.TryDequeue(out var xml))
+            foreach (var xml in _queue.GetConsumingEnumerable(_cts.Token))
             {
-                Thread.Sleep(5);
-                continue;
+                try
+                {
+                    _log($"RX << {xml}");
+                    _router.Route(XDocument.Parse(xml));
+                }
+                catch (Exception ex)
+                {
+                    _log($"Pump error: {ex}");
+                }
             }
-
-            try
-            {
-                _log($"RX << {xml}");
-                _router.Route(XDocument.Parse(xml));
-            }
-            catch (Exception ex)
-            {
-                _log($"Pump error: {ex}");
-            }
+        }
+        catch (OperationCanceledException)
+        {
+            // graceful shutdown
         }
     }
 
