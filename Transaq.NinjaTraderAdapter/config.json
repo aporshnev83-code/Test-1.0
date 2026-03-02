@@ -1,0 +1,9 @@
+{
+  "Login": "your-login",
+  "Password": "your-password",
+  "Host": "127.0.0.1",
+  "Port": 3900,
+  "AutoPos": true,
+  "DebugIncomingXml": false,
+  "AutoReconnect": false
+}
