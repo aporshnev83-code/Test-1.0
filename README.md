@@ -15,21 +15,62 @@ Production-oriented adapter skeleton for integrating `TXmlConnector.dll` with Ni
 - Strict callback -> queue -> single-thread message pump pipeline.
 - Testable core logic (unit tests without actual DLL).
 
-## Project structure
+## Build target
 
-- `Transaq.NinjaTraderAdapter/Interop/TransaqNative.cs` — P/Invoke + global DLL lock.
-- `Transaq.NinjaTraderAdapter/Transaq/*` — session, command client, callback bridge, message pump, XML routing.
-- `Transaq.NinjaTraderAdapter/State/*` — state stores and merge logic.
-- `Transaq.NinjaTraderAdapter/Ninja/*` — adapter and dispatch into Ninja thread.
-- `Transaq.NinjaTraderAdapter/Tests/*` — unit tests linked into test project.
+- **.NET Framework 4.8** (`net48`) for NinjaTrader 8 compatibility.
 
-## Setup
+## Packaging output (Windows, no Visual Studio required for end-user)
 
-1. Copy `TXmlConnector.dll` near NinjaTrader 8 custom assembly folder (or into probe path used by the adapter host).
-2. Open `Transaq.NinjaTraderAdapter.sln` in Visual Studio 2022+.
-3. Restore NuGet packages.
-4. Build solution in `Release|Any CPU`.
-5. Configure `Transaq.NinjaTraderAdapter/config.json`.
+Run one command on a build machine:
+
+```powershell
+./build-package.ps1 -Configuration Release -Platform "Any CPU"
+```
+
+Artifacts produced in `dist/`:
+
+- `Transaq.NinjaTraderAdapter.NT8.AddOn.zip` — importable from NinjaTrader:
+  - `Tools -> Import -> NinjaScript Add-On...`
+- `Transaq.NinjaTraderAdapter.Release.zip` — portable archive for manual diagnostics/install.
+
+## NinjaTrader package layout
+
+`NinjaTraderPackage/` is prepared for NT8 import workflow and contains:
+
+- `bin/Custom/Transaq.NinjaTraderAdapter.dll`
+- `config/config.json` (optional runtime config copy)
+- `readme.txt` (import/manual install instructions)
+
+## TXmlConnector.dll placement
+
+Place `TXmlConnector.dll` in any valid lookup location (recommended options):
+
+1. `Documents\NinjaTrader 8\bin\Custom\`
+2. Same folder as `Transaq.NinjaTraderAdapter.dll`
+3. NinjaTrader 8 application directory
+
+## Import/install instructions
+
+### Recommended: NT8 Add-On import
+
+1. Start NinjaTrader 8.
+2. Open `Tools -> Import -> NinjaScript Add-On...`
+3. Select `dist/Transaq.NinjaTraderAdapter.NT8.AddOn.zip`.
+4. Restart NinjaTrader 8 if prompted.
+
+### Manual portable install
+
+1. Unpack `dist/Transaq.NinjaTraderAdapter.Release.zip`.
+2. Copy `Transaq.NinjaTraderAdapter.dll` into `Documents\NinjaTrader 8\bin\Custom\`.
+3. Copy `config.json` next to DLL (optional) and update credentials/host/port.
+
+## Logging
+
+- Outgoing/incoming XML logging is supported through injected logger in adapter host code.
+- `config.json` contains debug-related switches (for example `DebugIncomingXml`).
+- NinjaTrader logs are typically in:
+  - `Documents\NinjaTrader 8\log\`
+  - `Documents\NinjaTrader 8\trace\`
 
 ## Transaq command format
 
@@ -70,13 +111,3 @@ Aggregation rule for `SnapshotByPriceAggregated`: sum `buy` and `sell` sizes for
 - Callback always returns `true`; errors are logged.
 - Single mutation thread: `TransaqMessagePump` routes XML and updates all state stores.
 - Message pump uses blocking queue semantics (no busy polling/sleep loops).
-
-## NinjaTrader 8 connection flow
-
-1. Create stores and `XmlRouter`.
-2. Create `TransaqSession` with `TransaqNative`.
-3. Create `NinjaAdapter` and subscribe to events (`OnBidAskUpdate`, `OnLastTrade`, `OnDomUpdate`, `OnOrderUpdate`).
-4. Call `Connect(login, password, host, port, autopos)`.
-5. Call `SubscribeMarketData(board, seccode)` for instruments.
-6. Send orders via `SendNewOrder`, cancel via `CancelOrder`, move via `MoveOrder`.
-7. On shutdown call `Disconnect()`/`Dispose()`.
